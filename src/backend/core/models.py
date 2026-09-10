@@ -25,7 +25,7 @@ from django.utils.translation import gettext_lazy as _
 from lasuite.tools.email import get_domain_from_email
 from timezone_field import TimeZoneField
 
-from . import fields, utils
+from . import fields, hashers, utils
 from .recording.enums import FileExtension
 from .validators import sub_validator
 
@@ -827,6 +827,31 @@ class Application(BaseModel):
 
     def __str__(self):
         return f"{self.name!s}"
+
+    def check_client_secret(self, raw_secret):
+        """Verify and lazily rehash without overwriting a concurrent rotation."""
+        original_hash = self.client_secret
+        if not hashers.verify_client_secret(raw_secret, original_hash):
+            return False
+
+        if original_hash.startswith("sha256$"):
+            return True
+
+        # Fast hashing assumes securely generated, high-entropy secrets.
+        # APPLICATION_CLIENT_SECRET_LENGTH controls generated length, not randomness.
+        encoded = hashers.hash_client_secret(raw_secret)
+        updated = Application.objects.filter(
+            pk=self.pk, client_secret=original_hash
+        ).update(client_secret=encoded)
+        if updated:
+            self.client_secret = encoded
+            return True
+
+        try:
+            self.refresh_from_db()
+        except type(self).DoesNotExist:
+            return False
+        return hashers.verify_client_secret(raw_secret, self.client_secret)
 
     def can_delegate_email(self, email):
         """Check if this application can delegate the given email."""

@@ -4,8 +4,10 @@ Core application fields
 
 from logging import getLogger
 
-from django.contrib.auth.hashers import identify_hasher, make_password
+from django.contrib.auth.hashers import identify_hasher
 from django.db import models
+
+from .hashers import hash_client_secret
 
 logger = getLogger(__name__)
 
@@ -24,6 +26,14 @@ class SecretField(models.CharField):
 
         secret = getattr(model_instance, self.attname)
 
+        if secret.startswith("sha256$"):
+            logger.debug(
+                "%s: %s is already hashed with sha256.",
+                model_instance,
+                self.attname,
+            )
+            return secret
+
         try:
             hasher = identify_hasher(secret)
             logger.debug(
@@ -36,7 +46,7 @@ class SecretField(models.CharField):
             logger.debug(
                 "%s: %s is not hashed; hashing it now.", model_instance, self.attname
             )
-            hashed_secret = make_password(secret)
+            hashed_secret = hash_client_secret(secret)
             setattr(model_instance, self.attname, hashed_secret)
             return hashed_secret
 
